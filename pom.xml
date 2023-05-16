@@ -6,12 +6,6 @@
     <artifactId>OAP_beans_test</artifactId>
     <version>1.0-SNAPSHOT</version>
 
-<!--    <parent>-->
-<!--        <groupId>oap</groupId>-->
-<!--        <artifactId>oap-ws-parent</artifactId>-->
-<!--        <version>18.3.7.5</version>-->
-<!--    </parent>-->
-
     <properties>
         <maven.compiler.source>18</maven.compiler.source>
         <maven.compiler.target>18</maven.compiler.target>
