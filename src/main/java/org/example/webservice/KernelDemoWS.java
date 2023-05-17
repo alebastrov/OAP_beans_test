@@ -16,7 +16,7 @@ public class KernelDemoWS {
 
     @WsMethod( path = "/services", produces = "text/html" )
     public String getKernel() {
-        return "<html><body><table><th><tr><td><b>module name</b></td><td><b>service/bean name</b></td></tr></th>" +
+        return "<html><body>do not click often then once in 2 seconds<table><th><tr><td><b>module name</b></td><td><b>service/bean name</b></td></tr></th>" +
                 kernel.services.values().stream()
                         .map(si -> {
                             return "<tr>" +
