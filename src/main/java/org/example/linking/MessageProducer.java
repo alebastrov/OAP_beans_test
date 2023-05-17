@@ -1,5 +1,8 @@
 package org.example.linking;
 
+import lombok.ToString;
+
+@ToString
 public class MessageProducer {
     public Ace toBeResolved;
 

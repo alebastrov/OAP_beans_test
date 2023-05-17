@@ -13,6 +13,7 @@ import java.nio.file.Path;
 
 @Slf4j
 public class Application extends Fixtures {
+    public static Kernel kernel;
 
     public static void main(String[] args) throws Exception {
 

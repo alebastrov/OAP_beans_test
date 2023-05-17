@@ -1,5 +1,8 @@
 package org.example;
 
+import lombok.ToString;
+
+@ToString
 public class NotNull {
     public int internalField;
     private String p1;

@@ -1,8 +1,10 @@
 package org.example.thread;
 
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
+@ToString
 public class SimpleThread implements Runnable {
     @Override
     public void run() {

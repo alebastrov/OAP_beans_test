@@ -1,5 +1,6 @@
 package org.example.webservice;
 
+import lombok.ToString;
 import oap.util.Lists;
 import oap.ws.WsMethod;
 import oap.ws.WsParam;
@@ -14,6 +15,7 @@ import static oap.http.server.nio.HttpServerExchange.HttpMethod.POST;
 import static oap.ws.WsParam.From.BODY;
 import static oap.ws.WsParam.From.PATH;
 
+@ToString
 public class MainWS {
     private final NotNull simple;
     private final NotNull full;
