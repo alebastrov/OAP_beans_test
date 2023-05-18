@@ -2,6 +2,7 @@ package org.example.webservice;
 
 import lombok.ToString;
 import oap.util.Lists;
+import oap.ws.Response;
 import oap.ws.WsMethod;
 import oap.ws.WsParam;
 import oap.ws.validate.WsValidateJson;
@@ -38,11 +39,11 @@ public class MainWS {
     }
 
     @WsMethod( method = POST, path = "/addData", produces = "text/plain" )
-    public String addData(@WsParam( from = BODY )
+    public Response addData(@WsParam( from = BODY )
                           @WsValidateJson( schema = "/schemas/data.conf" )
                           Data data,
                           Optional<String> bucket ) {
-        return "Got data: " + data + " and bucket: " + bucket;
+        return Response.jsonOk().withBody( data, false );
     }
 
     @WsMethod(method = GET, path = "/getData/{id}")
