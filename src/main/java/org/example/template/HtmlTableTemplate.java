@@ -6,7 +6,7 @@ import com.google.common.collect.Table;
 public class HtmlTableTemplate {
     private String tableStyle;
     private String cellStyle;
-    private Table<String, String, String> innerTable = HashBasedTable.create();
+    private final Table<String, String, String> innerTable = HashBasedTable.create();
 
     public void addCell(String moduleName, String serviceName, String value) {
         innerTable.put(moduleName, serviceName, value);
@@ -24,16 +24,6 @@ public class HtmlTableTemplate {
         } );
         result.append("</table>\n");
         return result.toString();
-    }
-
-    public static void main(String[] args) {
-        var table = new HtmlTableTemplate();
-        table.addCell("simple-init-module", "kernel-holder", "/kernel/service/modules.simple-init-module.kernel-holder");
-        table.addCell("simple-init-module", "simple-thread-service", "");
-        table.addCell("simple-init-module", "other-objects-factory", "");
-        table.addCell("simple-init-module", "ace2", "");
-        table.addCell("simple-init-module", "ddos-attack-preventer", "");
-        System.err.println(table);
     }
 
     public void setTableStyle(String tableStyle) {
