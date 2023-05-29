@@ -16,7 +16,7 @@ public class ProgressWS {
     private Map<String, ProgressHolder> allProgresses = new ConcurrentHashMap<>();
 
     public ProgressWS() {
-        createOrUpdateProgress("123", Optional.of( 1.0), Optional.of( 100.0), Optional.of( "Creating..." ));
+//        createOrUpdateProgress("123", Optional.of( 1.0), Optional.of( 100.0), Optional.of( "Creating..." ));
     }
 
     private Optional<ProgressHolder> get(String id ) {
