@@ -16,12 +16,30 @@ public class ProgressWS {
     private Map<String, ProgressHolder> allProgresses = new ConcurrentHashMap<>();
 
     public ProgressWS() {
-//        createOrUpdateProgress("123", Optional.of( 1.0), Optional.of( 100.0), Optional.of( "Creating..." ));
-    }
-
-    private Optional<ProgressHolder> get(String id ) {
-        ProgressHolder progressHolder = allProgresses.get(id);
-        return Optional.ofNullable( progressHolder );
+        createOrUpdateProgress("123", Optional.of( 0.0), Optional.of( 90.0), Optional.of( "Creating..." ));
+        new Thread(() -> {
+            boolean plusSign = true;
+            long startTime = System.currentTimeMillis();
+            while (true) {
+                try {
+                    Thread.currentThread().sleep(100);
+                    ProgressHolder progressHolder = get("123").get();
+                    progressHolder.tick( plusSign ? 1.0 : -1.0 );
+                    if (progressHolder.isFrozen()) {
+                        plusSign = !plusSign;
+                    }
+                    long elapsed = (System.currentTimeMillis() - startTime) / 1000;
+                    if (elapsed < 15) {
+                        progressHolder.setFrozen(true);
+                    } else {
+                        progressHolder.setFrozen(false);
+                    }
+                    progressHolder.setMessage("working hard "+ elapsed +" sec...");
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }).start();
     }
 
     @WsMethod( path = "/createProgress/{id}"  )
@@ -39,6 +57,12 @@ public class ProgressWS {
             if ( start.isPresent() ) ph.setStart( start.get() );
             return ph;
         } );
+    }
+
+    @WsMethod( path = "/get/{id}" )
+    public Optional<ProgressHolder> get( @WsParam( from = WsParam.From.PATH ) String id ) {
+        ProgressHolder progressHolder = allProgresses.get(id);
+        return Optional.ofNullable( progressHolder );
     }
 
     @WsMethod( path = "/deleteProgress/{id}"  )
@@ -130,5 +154,35 @@ public class ProgressWS {
     @WsMethod( path = "/all"  )
     public List<ProgressHolder> allProgressors() {
         return new ArrayList<>( allProgresses.values() );
+    }
+
+    @WsMethod( path = "/getHtml/{id}", produces = "text/html" )
+    public String getHtml( @WsParam(from = WsParam.From.PATH ) String id ) {
+        Optional<ProgressHolder> progressHolder = get(id);
+        if ( progressHolder.isEmpty() ) return "";
+        return """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+</head>
+<body>
+<div <<aria-busy>> aria-describedby="<<id>>"/>
+
+<label><<message>><br/><progress id="<<id>>" <<value-max>>> <br/><<message>> <<current>> %</progress>
+</label>
+
+
+
+</body>
+</html>
+                              """
+                .replace( "<<id>>", "" + progressHolder.get().getId() )
+                .replace( "<<aria-busy>>", progressHolder.get().isFrozen() ? "aria-busy=\"true\"" : "" )
+                .replace( "<<current>>", "" + (int) progressHolder.get().getCurrent() )
+                .replace( "<<value-max>>", progressHolder.get().isFrozen() ? "" : "value=\""+progressHolder.get().getCurrent()+"\" max=\""+progressHolder.get().getEnd()+"\"" )
+                .replace( "<<start>>", "" + (int) progressHolder.get().getStart() )
+                .replace( "<<end>>", "" + (int) progressHolder.get().getEnd() )
+                .replace( "<<message>>", progressHolder.get().getMessage() );
     }
 }
