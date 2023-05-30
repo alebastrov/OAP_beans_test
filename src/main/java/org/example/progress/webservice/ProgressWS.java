@@ -16,25 +16,26 @@ public class ProgressWS {
     private Map<String, ProgressHolder> allProgresses = new ConcurrentHashMap<>();
 
     public ProgressWS() {
-        createOrUpdateProgress("123", Optional.of( 0.0), Optional.of( 90.0), Optional.of( "Creating..." ));
+        createOrUpdateProgress("123", Optional.of( 0.0), Optional.of( 90000.0), Optional.of( "Creating..." ));
         new Thread(() -> {
             boolean plusSign = true;
             long startTime = System.currentTimeMillis();
             while (true) {
                 try {
-                    Thread.currentThread().sleep(100);
+                    Thread.currentThread().sleep(10);
                     ProgressHolder progressHolder = get("123").get();
-                    progressHolder.tick( plusSign ? 1.0 : -1.0 );
                     if (progressHolder.isFrozen()) {
                         plusSign = !plusSign;
                     }
                     long elapsed = (System.currentTimeMillis() - startTime) / 1000;
                     if (elapsed < 15) {
                         progressHolder.setFrozen(true);
+                        progressHolder.setMessage("selecting items from DB "+ elapsed +" sec...");
                     } else {
                         progressHolder.setFrozen(false);
+                        progressHolder.tick( plusSign ? 1.0 : -1.0 );
+                        progressHolder.setMessage("processing #"+(long)progressHolder.getCurrent()+"/"+(long)progressHolder.getEnd()+" item, remain "+ progressHolder.getStatistics().remainingSeconds() +" sec ("+(long)progressHolder.getStatistics().speed()+" tps)...");
                     }
-                    progressHolder.setMessage("working hard "+ elapsed +" sec...");
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 }
