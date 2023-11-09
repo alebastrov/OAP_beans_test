@@ -1,7 +1,7 @@
 package org.example.healtz.utils;
 
 
-import com.sun.management.GarbageCollectionNotificationInfo;
+
 import org.example.healtz.utils.types.GarbageCollectors;
 import org.example.healtz.utils.types.GcDetector;
 
@@ -9,10 +9,8 @@ import javax.management.Notification;
 import javax.management.NotificationEmitter;
 import javax.management.NotificationListener;
 import javax.management.openmbean.CompositeData;
-import java.beans.BeanInfo;
-import java.beans.IntrospectionException;
-import java.beans.Introspector;
-import java.beans.PropertyDescriptor;
+import javax.management.openmbean.CompositeDataSupport;
+import javax.management.openmbean.TabularDataSupport;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryUsage;
@@ -21,26 +19,21 @@ import java.lang.ref.WeakReference;
 import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static com.sun.management.GarbageCollectionNotificationInfo.GARBAGE_COLLECTION_NOTIFICATION;
-import static com.sun.management.GarbageCollectionNotificationInfo.from;
 
 public final class GCInfoCollector {
   private static final MemoryUsage empty = new MemoryUsage( 1, 1, 1, 1 );
   private static GCInfoCollector instance;
 
-  private int maxEventsCount = 300;
+  private volatile int maxEventsCount = 300;
   private ArrayDeque<GCInfoBlock> storage = null;
   private volatile GCInfoBlock.Payloads lastGcState = GCInfoBlock.Payloads.OK;
   private GcNotificationListener gcEventListener = new GcNotificationListener();
-
-  private GarbageCollectionNotificationInfo gcNotificationInfo;
 
   public static synchronized GCInfoCollector getGCInfoCollector() {
     if ( instance == null ) {
@@ -52,57 +45,80 @@ public final class GCInfoCollector {
   class GcNotificationListener implements NotificationListener {
     @Override
     public void handleNotification( Notification notification, Object handback ) {
-      String notificationType = notification.getType();
-      if ( !notificationType.equals( GARBAGE_COLLECTION_NOTIFICATION ) ) {
-        return;
-      }
-      CompositeData compositeData = ( CompositeData ) notification.getUserData();
-      GarbageCollectionNotificationInfo gcni = from( compositeData );
-      GCInfoCollector.this.gcNotificationInfo = gcni;
-      if ( "end of minor GC".equals( gcni.getGcAction() ) ) {
-        GCInfoBlock infoBlock = createInfoBlock2( gcni );
+      CompositeData cdata = ( CompositeData ) notification.getUserData();
+      String gcAction = ( String ) cdata.get( "gcAction" );
+      CompositeDataSupport gcni = ( CompositeDataSupport ) cdata.get( "gcInfo" );
+      if ( "end of minor GC".equals( gcAction ) ) {
+        GCInfoBlock infoBlock = createInfoBlock( cdata, gcni );
         if ( infoBlock == null ) return;
-        infoBlock.setType( guessGcType( gcni ) );
-        addGc( infoBlock, gcni );
+        infoBlock.setType( guessGcType( cdata ) );
+        addGc( infoBlock );
         return;
       }
-      if ( "end of major GC".equals( gcni.getGcAction() ) ) {
-        GCInfoBlock infoBlock = createInfoBlock2( gcni );
-        if ( infoBlock == null ) addEmpty( gcni.getGcInfo().getDuration() );
-        else {
-          infoBlock.setType( guessGcType( gcni ) );
-          addGc( infoBlock, gcni );
+      if ( "end of major GC".equals( gcAction ) ) {
+        GCInfoBlock infoBlock = createInfoBlock( cdata, gcni );
+        if ( infoBlock != null ) {
+          infoBlock.setType( guessGcType( cdata ) );
+          addGc( infoBlock );
         }
         return;
       }
-      if ( "end of GC pause".equals( gcni.getGcAction() )
-          || "end of GC cycle".equals( gcni.getGcAction() ) ) {
+      if ( "end of GC pause".equals( gcAction ) || "end of GC cycle".equals( gcAction ) ) {
         //shenandoah minor gc | concurrent
-        GCInfoBlock infoBlock = createInfoBlock2( gcni );
-        if ( infoBlock == null ) addEmpty( gcni.getGcInfo().getDuration() );
-        else {
-          infoBlock.setType( guessGcType( gcni ) );
-          addGc( infoBlock, gcni );
+        GCInfoBlock infoBlock = createInfoBlock( cdata, gcni );
+        if ( infoBlock != null ) {
+          infoBlock.setType( guessGcType( cdata ) );
+          addGc( infoBlock );
         }
       }
-
-//      System.err.println( "!!! phase: [" + gcni.getGcAction() + "]" );
     }
 
-    private GCInfoBlock createInfoBlock2( GarbageCollectionNotificationInfo gcmi ) {
-      if ( gcmi.getGcInfo().getDuration() <= 0L ) {
-        return null;
-      }
-      long curTime = System.currentTimeMillis();
-      String mbeanName = gcmi.getGcName();
-
+    private GCInfoBlock createInfoBlock( CompositeData cdata, CompositeDataSupport compositeData ) {
+      GarbageCollectors collector = GcDetector.get( cdata );
+      String mbeanName = collector.getName( cdata );
       final GCInfoBlock infoBlock = new GCInfoBlock();
+      infoBlock.setDuration( collector.getDuration( compositeData ) );
+      if ( infoBlock.getDuration() == 0 ) return null;
       infoBlock.setGCName( mbeanName );
-      infoBlock.setTime( curTime );
-      infoBlock.setCallNumber( gcmi.getGcInfo().getId() );
-      infoBlock.setDuration( gcmi.getGcInfo().getDuration() );
+      infoBlock.setTime( System.currentTimeMillis() );
+      infoBlock.setCallNumber( collector.getId( compositeData ) );
+      TabularDataSupport tds = collector.getUsageAfterGc( compositeData );
+      infoBlock.setMemoryUsage( getSumOfMemoryUsages( tds ) );
       return infoBlock;
     }
+  }
+
+  private static final Set<String> nonGcStuff = new HashSet<>();
+  static {
+    nonGcStuff.add( "Metaspace" );
+    nonGcStuff.add( "Compressed Class Space" );
+    nonGcStuff.add( "CodeHeap 'non-profiled nmethods'" );
+    nonGcStuff.add( "CodeHeap 'profiled nmethods'" );
+    nonGcStuff.add( "CodeHeap 'non-nmethods'" );
+  }
+
+  private MemoryUsage getSumOfMemoryUsages( TabularDataSupport tds ) {
+    AtomicLong init = new AtomicLong();
+    AtomicLong used = new AtomicLong();
+    AtomicLong committed = new AtomicLong();
+    AtomicLong max = new AtomicLong();
+
+    tds.forEach( ( k, v ) -> {
+      String gcInfoEventName = ( String ) ( ( List ) k ).get( 0 );
+      if ( nonGcStuff.contains( gcInfoEventName ) ) return; //skip all non GC stuff
+      MemoryUsage memoryUsage = MemoryUsage.from( ( CompositeData ) ( ( CompositeDataSupport ) v ).get( "value" ) );
+      init.addAndGet( memoryUsage.getInit() );
+      used.addAndGet( memoryUsage.getUsed() );
+      committed.addAndGet( memoryUsage.getCommitted() );
+      max.addAndGet( memoryUsage.getMax() );
+    } );
+
+    long cm = committed.get();
+    long mx = max.get();
+    if ( mx >= 0 && cm > mx ) {
+      cm = mx;
+    }
+    return new MemoryUsage( init.get(), used.get(), cm, mx );
   }
 
   public void attachListenerToGarbageCollector( List<GarbageCollectorMXBean> mbeans ) {
@@ -124,77 +140,34 @@ public final class GCInfoCollector {
     }
   }
 
-  private static final Set<String> nonGcStuff = new HashSet<>();
-  static {
-    nonGcStuff.add( "Metaspace" );
-    nonGcStuff.add( "Compressed Class Space" );
-    nonGcStuff.add( "CodeHeap 'non-profiled nmethods'" );
-    nonGcStuff.add( "CodeHeap 'profiled nmethods'" );
-    nonGcStuff.add( "CodeHeap 'non-nmethods'" );
-  }
-  private void addGc( GCInfoBlock resInfoBlock,
-                      GarbageCollectionNotificationInfo gcni ) {
+  private void addGc( GCInfoBlock infoBlock ) {
 
-    if ( resInfoBlock == null ) {
+    if ( infoBlock == null ) {
       return;
     }
-    Map<String, MemoryUsage> memoryUsageMap = gcni.getGcInfo().getMemoryUsageAfterGc();
-    //skip all non GC stuff
-    //count sum
-    AtomicLong init = new AtomicLong();
-    AtomicLong used = new AtomicLong();
-    AtomicLong committed = new AtomicLong();
-    AtomicLong max = new AtomicLong();
-    memoryUsageMap.entrySet()
-      .stream()
-      .filter( entry -> !nonGcStuff.contains( entry.getKey() ) )
-      .forEach( entry -> {
-        MemoryUsage memoryUsage = entry.getValue();
-        init.addAndGet( memoryUsage.getInit() );
-        used.addAndGet( memoryUsage.getUsed() );
-        committed.addAndGet( memoryUsage.getCommitted() );
-        max.addAndGet( memoryUsage.getMax() );
-      } );
-    long cm = committed.get();
-    long mx = max.get();
-    if ( mx >= 0 && cm > mx ) {
-      cm = mx;
+
+    GCInfoBlock last = null;
+    synchronized ( this ) {
+      last = storage.isEmpty() ? null : storage.getLast();
     }
-    resInfoBlock.setMemoryUsage( new MemoryUsage( init.get(), used.get(), cm, mx ) );
-    if ( !storage.isEmpty() ) {
-      GCInfoBlock last = storage.getLast();
-      long workTime = resInfoBlock.getTime() - last.getTime();
-      long duration = resInfoBlock.getDuration();
+    if ( last != null ) {
+      long workTime = infoBlock.getTime() - last.getTime();
+      long duration = infoBlock.getDuration();
       int workPercent = workTime == 0 ? 0 : ( int ) ( ( workTime - duration ) * 100L / workTime );
-      resInfoBlock.setGcState( GCInfoBlock.Payloads.getByLoad( workPercent ) );
-      lastGcState = resInfoBlock.getGcState();
+      infoBlock.setGcState( GCInfoBlock.Payloads.getByLoad( workPercent ) );
+      lastGcState = infoBlock.getGcState();
     } else {
       lastGcState = GCInfoBlock.Payloads.OK;
     }
-    addToStorage( resInfoBlock );
+    addToStorage( infoBlock );
   }
 
   private void addToStorage( GCInfoBlock resInfoBlock ) {
     if ( resInfoBlock.getDuration() == 0 ) return;
-    storage.addLast( resInfoBlock );
-    if ( storage.size() > maxEventsCount ) storage.removeFirst();
-  }
-
-  @Deprecated
-  private void addEmpty( long curTime ) {
-    GCInfoBlock last = !storage.isEmpty() ? storage.getLast() : null;
-    if ( last != null && last.getCallNumber() == 0 && last.getDuration() == 0 ) {
-      last.setCompacted( last.getCompacted() + 1 );
-      return;
+    synchronized ( this ) {
+      storage.addLast(resInfoBlock);
+      if (storage.size() > maxEventsCount) storage.removeFirst();
     }
-    final GCInfoBlock infoBlock = new GCInfoBlock();
-    infoBlock.setGCName( "--" );
-    infoBlock.setTime( curTime );
-    infoBlock.setCallNumber( 0 );
-    infoBlock.setDuration( 0 );
-    infoBlock.setMemoryUsage( empty );
-    infoBlock.setEmpty( true );
-    addToStorage( infoBlock );
   }
 
   public GCInfoBlock.Payloads getLastGcState() {
@@ -213,15 +186,17 @@ public final class GCInfoCollector {
     return storage.stream().filter( gcInfoBlock -> !gcInfoBlock.isEmpty() ).toList();
   }
 
-  public synchronized void setMaxEventsCount( int maxEventsCount ) {
+  public void setMaxEventsCount( int maxEventsCount ) {
     if ( maxEventsCount < 10 ) throw new IllegalArgumentException( "Too small (" + maxEventsCount + ") value for history (less than 10)" );
     this.maxEventsCount = maxEventsCount;
     ArrayDeque<GCInfoBlock> newStorage = new ArrayDeque<>( maxEventsCount );
-    if ( storage != null && !storage.isEmpty() ) {
-      newStorage.addAll( storage );
-      while ( newStorage.size() > maxEventsCount ) newStorage.removeFirst();
+    synchronized ( this ) {
+      if (storage != null && !storage.isEmpty()) {
+        newStorage.addAll(storage);
+        while (newStorage.size() > maxEventsCount) newStorage.removeFirst();
+      }
+      storage = newStorage;
     }
-    storage = newStorage;
   }
 
   private interface ReferenceValue<T> {
@@ -241,9 +216,11 @@ public final class GCInfoCollector {
       return resul;
     }
   }
+
   public enum ReferenceType {
     WEAK, SOFT, STRONG
   }
+
   private static class StrongReferenceHolder<T> implements ReferenceValue<T> {
     private final T value;
     StrongReferenceHolder( T value ) {
@@ -253,6 +230,7 @@ public final class GCInfoCollector {
       return value;
     }
   }
+
   private static class SoftReferenceHolder<T> implements ReferenceValue<T> {
     private final SoftReference<T> value;
     SoftReferenceHolder( T val ) {
@@ -262,6 +240,7 @@ public final class GCInfoCollector {
       return value.get();
     }
   }
+
   private static class WeakReferenceHolder<T> implements ReferenceValue<T> {
     private final WeakReference<T> value;
     WeakReferenceHolder( T val ) {
@@ -272,30 +251,9 @@ public final class GCInfoCollector {
     }
   }
 
-  public static Map<String, Object> toMap( GarbageCollectorMXBean o ) {
-    LinkedHashMap<String, Object> map = new LinkedHashMap<>();
-    BeanInfo beanInfo = null;
-    try {
-      beanInfo = Introspector.getBeanInfo( o.getClass() );
-    } catch ( IntrospectionException e ) {
-      throw new RuntimeException( e );
-    }
-    for ( PropertyDescriptor propertyDescriptor : beanInfo.getPropertyDescriptors() ) {
-      if ( propertyDescriptor.getName().equals( "class" ) ) continue;
-      Object value = null;
-      try {
-        value = propertyDescriptor.getReadMethod().invoke( o );
-      } catch ( Exception e ) {
-        value = e.toString();
-      }
-      map.put( propertyDescriptor.getName(), value );
-    }
-    return map;
-  }
-
-  GCInfoBlock.GcType guessGcType( GarbageCollectionNotificationInfo gcni ) {
-    GarbageCollectors collector = GcDetector.get( gcni );
-    if ( collector.isConcurrentPhase( gcni.getGcCause(), gcni.getGcName() ) ) return GCInfoBlock.GcType.CONCURRENT;
+  GCInfoBlock.GcType guessGcType( CompositeData cdata ) {
+    GarbageCollectors collector = GcDetector.get( cdata );
+    if ( collector.isConcurrentPhase( ( String ) cdata.get( "gcCause" ), ( String ) cdata.get( "gcName" ) ) ) return GCInfoBlock.GcType.CONCURRENT;
     return GCInfoBlock.GcType.STW;
   }
 
@@ -303,7 +261,7 @@ public final class GCInfoCollector {
   public static void main( String[] args ) throws Exception {
     final AtomicInteger cicleNumber = new AtomicInteger();
     // to attach listener
-    GCInfoCollector infoCollector = GCInfoCollector.getGCInfoCollector();
+    GCInfoCollector.getGCInfoCollector();
     Thread nagibatel = new Thread( () -> {
       Map<Integer, ReferenceValue<byte[]>> map = new HashMap<>();
       for ( int i = 0; i < 100_000_000; i++ ) {

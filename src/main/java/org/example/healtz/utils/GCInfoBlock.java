@@ -2,13 +2,6 @@ package org.example.healtz.utils;
 
 import java.lang.management.MemoryUsage;
 
-/**
- * Created by IntelliJ IDEA.
- * User: Igor
- * Date: 04.03.2006
- * Time: 13:22:57
- * To change this template use File | Settings | File Templates.
- */
 public class GCInfoBlock {
   public double getCompacted() {
     return 2.0 + 2.0 * Math.log( compacted );
@@ -124,8 +117,8 @@ public class GCInfoBlock {
     return callNumber;
   }
 
-  public void setDuration( long duration ) {
-    this.duration = duration;
+  public void setDuration( Long duration ) {
+    this.duration = duration == null ? 0 : duration;
   }
 
   public long getDuration() {
